@@ -1,4 +1,4 @@
-import {activitySentence, aspectsFor, completedClauses, extractSkills, jobs, skills} from "./catalog.js?v=18";
+import {activitySentence, aspectsFor, completedClauses, extractProject, extractSkills, jobs, skills} from "./catalog.js?v=18";
 import {icon} from "./icons.js";
 import {readActivities, writeActivity} from "./storage.js?v=18";
 import {proposeSync, snapshot} from "./eclass.js?v=18";
@@ -14,7 +14,8 @@ const syncKinds = {syllabus:"수업계획서", submission:"과제 제출물"};
 const syncTypes = {syllabus:"스킬", submission:"프로젝트"};
 const guideKinds = [["도서","book"],["강의","play"],["세미나","mic"]];
 const escape = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const blank = () => ({text:"", project:false, suggestions:null, selected:new Set(), original:null, returnTo:""});
+// `found` is the project the model saw in the text (or null); `project` is whether the user keeps it.
+const blank = () => ({text:"", project:false, found:null, suggestions:null, selected:new Set(), original:null, returnTo:""});
 let draft = blank();
 let activities = [];
 let loaded = false;
@@ -68,6 +69,11 @@ function syncIndex() {
     return [criterion, matches];
   }));
 }
+// When the app runs inside presentation.html, tell the deck which button was pressed so it can
+// light up the matching part of its diagram. Outside the deck this does nothing.
+function tellDeck(event) {
+  if (window.parent !== window) window.parent.postMessage({source:"skillnote", event}, "*");
+}
 function notice(message) {
   const box = document.querySelector("#message");
   clearTimeout(messageTimer);
@@ -95,16 +101,18 @@ function chip(id) { return `<span class="chip">${escape(skills[id].name)}</span>
 function review() {
   if (draft.suggestions === null) return "";
   const rows = draft.suggestions.map(item => `<label class="suggestion"><input type="checkbox" data-skill="${item.id}" ${draft.selected.has(item.id) ? "checked" : ""}><span><strong>${skills[item.id].name}</strong><small>기록에서 찾은 표현 · “${escape(item.trigger)}”</small></span></label>`).join("");
+  const project = draft.found ? `<h3 class="review-project">추출한 프로젝트 <span class="count">1</span></h3>
+    <label class="suggestion"><input type="checkbox" data-draft-project ${draft.project ? "checked" : ""}><span><strong>${escape(draft.found.name)}</strong>${aspectChips(draft.found.tags.flatMap(([,values]) => values))}</span></label>` : "";
   return `<section class="review" id="review" aria-labelledby="review-title"><h3 id="review-title" tabindex="-1">추출한 스킬 <span class="count">${draft.suggestions.length}</span></h3>
     <p>${rows ? "직접 경험한 스킬만 선택해 저장하세요." : "찾은 스킬이 없어요. 활동만 저장하거나 사용한 도구와 작업을 더 적어 보세요."}</p>
-    ${rows}<div class="action-end"><button class="primary" data-action="save" ${saving || !loaded ? "disabled" : ""}>${icon("check")}${draft.original ? "수정 저장" : "활동 저장"}</button></div></section>`;
+    ${rows}${project}<div class="action-end"><button class="primary" data-action="save" ${saving || !loaded ? "disabled" : ""}>${icon("check")}${draft.original ? "수정 저장" : "활동 저장"}</button></div></section>`;
 }
 function composer() {
   const sentenceButton = `<button class="load-sentence" data-action="load-sentence">${icon("bulb")}문장 불러오기</button>`;
   return `<section class="card compose" id="composer">${heading("pen",draft.original ? "활동 수정" : "새 활동 작성",sentenceButton,"h1")}
     <label for="activity">수업이나 수업 밖에서 어떤 활동을 했나요?</label>
     <div class="textarea-wrap"><textarea id="activity" maxlength="2000" placeholder="사용한 도구와 직접 한 일을 적어 보세요.">${escape(draft.text)}</textarea><span class="counter"><b id="length">${draft.text.length}</b> / 2,000</span></div>
-    <label class="project-source"><input type="checkbox" data-activity-project ${draft.project ? "checked" : ""}> 직접 수행한 프로젝트</label>
+
     <div class="compose-actions"><span class="local-cue">${icon("archive")}이 기기에 저장</span><div class="actions">${draft.original || draft.returnTo ? '<button class="subtle" data-action="cancel-edit">취소</button>' : ""}
     <button class="primary" data-action="extract" ${draft.suggestions !== null ? "hidden" : ""}>${icon("spark")}스킬 추출</button></div></div>
     <div id="review-slot">${review()}</div></section>`;
@@ -112,12 +120,14 @@ function composer() {
 // A project shows as its name; pressing it opens the tags attached to it.
 function projectBody(a) {
   const cut = a.source ? a.text.indexOf(": ") : -1;
-  const name = cut > 0 ? a.text.slice(0, cut) : a.text.split(/[.\n]/)[0];
+  const name = a.title || (cut > 0 ? a.text.slice(0, cut) : a.text.split(/[.\n]/)[0]);
   const from = a.source || {};
   const subs = [...new Set(a.matches.flatMap(item => matchAspects(a,item)))];
   const rows = [
     ["스킬", a.matches.map(m => chip(m.id)).join("")],
     ["세부 역량", subs.map(sub => `<span class="aspect">${escape(sub)}</span>`).join("")],
+    // Details the model pulled out of a written record: [label, [values]].
+    ...(a.tags || []).map(([label,values]) => [label, values.map(value => `<span class="aspect">${escape(value)}</span>`).join("")]),
     ["목적", from.purpose ? escape(from.purpose) : ""],
     ["형태", [from.team ? "팀 프로젝트" : "", from.count > 1 ? from.count + "회 제출" : ""].filter(Boolean).join(" · ")],
     ["출처", from.course ? escape([from.course, from.term, from.origin].filter(Boolean).join(" · ")) : ""]
@@ -415,7 +425,7 @@ async function persist(remove=null) {
   const returnTo=draft.returnTo;
   try {
     const id=before?.id || crypto.randomUUID();
-    const next=remove ? null : {...before,id,created:before?.created ?? Date.now(), text:draft.text.trim(), project:draft.project, matches:draft.suggestions.filter(m=>draft.selected.has(m.id))};
+    const next=remove ? null : {...before,id,created:before?.created ?? Date.now(), text:draft.text.trim(), project:draft.project, title:draft.project ? draft.found.name : undefined, tags:draft.project ? draft.found.tags : undefined, matches:draft.suggestions.filter(m=>draft.selected.has(m.id))};
     await writeActivity(id,before?.revision ?? 0,next);
     if (!remove || draft.original?.id === id) draft=blank();
     await refresh(false);
@@ -436,7 +446,7 @@ document.addEventListener("input", event => {
   if (draft.suggestions !== null) clearReview();
 });
 document.addEventListener("change", event => {
-  if (event.target.matches("[data-activity-project]")) {
+  if (event.target.matches("[data-draft-project]")) {
     draft.project = event.target.checked;
     return;
   }
@@ -488,24 +498,35 @@ document.addEventListener("click", event => {
   const el=event.target.closest("[data-action]");
   if (!el) return;
   const {action,id,skill,filter,use}=el.dataset;
+  // Reading stored skills, projects or records: the deck shows the matching lookup diagram.
+  if (["skills","evidence","projects","activities"].includes(action)) tellDeck(action);
+  // eclass sync: fetching and extracting, then saving what the user confirmed.
+  if (action === "sync-open" || action === "sync-apply") tellDeck(action);
   if (action === "close") dialog.close();
   else if (action === "confirm") {const run=modalAction; dialog.close(); run?.();}
   else if (action === "retry") refresh();
   else if (action === "sync-open") openSync();
   else if (action === "sync-apply") {el.disabled=true; applySync();}
 
-  else if (action === "load-sentence") discardThen(()=>{draft.text=activitySentence; draft.suggestions=null; render(); editFocus();});
+  else if (action === "load-sentence") {
+    tellDeck("load-sentence");
+    discardThen(()=>{draft.text=activitySentence; draft.suggestions=null; render(); editFocus();});
+  }
   else if (action === "extract") {
     const input=document.querySelector("#activity");
     if (!draft.text.trim()) {input.setCustomValidity("활동 내용을 먼저 적어 주세요."); input.reportValidity(); input.setCustomValidity(""); input.focus(); return;}
     draft.suggestions=extractSkills(draft.text);
+    // An edited record stays a project if it was one, even when the wording no longer says so.
+    draft.found=extractProject(draft.text, draft.suggestions) || (draft.original?.project ? {name:draft.original.title || "프로젝트", tags:draft.original.tags || []} : null);
+    draft.project=Boolean(draft.found);
+    tellDeck("extract");
     // An edit keeps manual exclusions unless the user adds a new skill to the text.
     const oldFound = draft.original ? extractSkills(draft.original.text).map(m=>m.id) : [];
     draft.selected=new Set(draft.suggestions.filter(m=>!oldFound.includes(m.id) || draft.original?.matches.some(old=>old.id===m.id)).map(m=>m.id));
     el.hidden=true;
     document.querySelector("#review-slot").innerHTML=review();
     document.querySelector("#review-title").focus();
-  } else if (action === "save" && draft.suggestions !== null) {el.disabled=true; persist();}
+  } else if (action === "save" && draft.suggestions !== null) {el.disabled=true; tellDeck("save"); persist();}
   else if (action === "filter") {jobFilter=filter; render(); document.querySelector('[aria-pressed="true"]').focus({preventScroll:true});}
   else if (action === "activities" || action === "projects") openActivities(action === "projects");
   else if (action === "use-all") setUse(activities.filter(a => (!listProjects || a.project) && Boolean(a.off) !== (use === "off")), use === "off");
@@ -535,7 +556,9 @@ dialog.addEventListener("keydown", event => {
   selectOwnedSkill(tabs[index].dataset.skill);
 });
 dialog.addEventListener("click",event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect(); if(event.clientX<r.left || event.clientX>r.right || event.clientY<r.top || event.clientY>r.bottom) dialog.close();}});
-window.addEventListener("hashchange",()=>{render(); window.scrollTo(0,0); if(route().panel==="journal" && draft.returnTo) editFocus(); else main.focus({preventScroll:true});});
+window.addEventListener("hashchange",()=>{render();
+  // Opening the 채용 공고 list, or one posting (and its requirements): the deck shows the matching diagram.
+  if (route().panel === "jobs") tellDeck(route().job ? "job-detail" : "jobs"); window.scrollTo(0,0); if(route().panel==="journal" && draft.returnTo) editFocus(); else main.focus({preventScroll:true});});
 channel?.addEventListener("message",()=>refresh());
 window.addEventListener("pageshow",e=>{if(e.persisted) refresh();});
 window.addEventListener("storage", event => {
@@ -543,6 +566,8 @@ window.addEventListener("storage", event => {
 });
 render();
 refresh();
-if (location.protocol !== "file:" && "serviceWorker" in navigator) {
+// Offline caching only exists for the hosted app. The single-file build (opened from disk or embedded
+// in presentation.html) has no sw.js beside it and inlines its styles, so it must not try or warn.
+if (/^https?:$/.test(location.protocol) && document.querySelector('link[rel="stylesheet"]') && "serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js").catch(() => notice("오프라인 저장을 준비하지 못했어요."));
 }

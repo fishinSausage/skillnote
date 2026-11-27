@@ -286,3 +286,4 @@ dialog:has(.sync)>.section-title {flex:none;padding:14px 20px;border-bottom:1px 
 .stats strong {font-size:34px}
 .board-all {display:inline-block;margin-top:14px;min-height:30px}
 @media(max-width:940px) {.stats>button {padding:0 14px}}
+.review-project {margin-top:18px}

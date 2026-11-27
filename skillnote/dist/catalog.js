@@ -310,7 +310,7 @@ export const jobs = [
   })
   .sort((left, right) => (left.deadline || "9999").localeCompare(right.deadline || "9999"));
 
-export const activitySentence = "수업에서 Python으로 설문 응답의 결측치를 정리했다. Excel로 응답을 분류하고 Google Sheets로 팀별 응답 수를 집계했다.";
+export const activitySentence = "머신러닝 수업에서 팀원 3명과 Python으로 영화 평점 데이터 10만 건의 결측치를 정리하고 협업 필터링 기반 영화 평점 예측 모델을 구현했다. 교차 검증으로 하이퍼파라미터를 튜닝해 RMSE를 0.98에서 0.91로 낮추고 결과를 막대그래프로 시각화했다.";
 const planned = /예정|계획|(?:배울|익힐|공부할|만들|쓸|해볼|할)\s*(?:것|거|생각)|할\s*수\s*없|하려(?:고|는)|싶(?:다|어|습니다)|아직|못\s*(?:했|해|하)|지\s*(?:않|못)|(?:다음\s*(?:학기|주|달)|앞으로).*?(?:배울|할|쓸|만들|공부)|\b(?:will|want to|plan(?:ning)? to|hope to|haven't|didn't|did not|not yet)\b/i;
 
 export function completedClauses(text) {
@@ -332,6 +332,38 @@ const aspectRules = {
 export function aspectsFor(id, text) {
   const done = completedClauses(text).join("\n");
   return (aspectRules[id] || []).filter(([,pattern]) => pattern.test(done)).map(([name]) => name);
+}
+
+// Stand-in for the model deciding whether a written record describes a project (something the user built).
+// The user no longer ticks a box for this. The name follows the job-posting style in SPEC.md:
+// main skill + kind of work + "프로젝트".
+const built = /프로젝트|구현|개발했|만들었|제작했|완성했|built|developed|implemented/i;
+const projectKinds = [
+  ["모델 개발 및 성능 평가",/모델[\s\S]*(?:RMSE|정확도|검증|평가)|(?:RMSE|정확도|검증|평가)[\s\S]*모델/],
+  ["모델 개발",/모델/],["프론트엔드",/화면|컴포넌트|프론트엔드/],["백엔드",/\bAPI\b|서버|백엔드/],["데이터 분석",/분석|집계|시각화/]
+];
+const projectMethods = [["협업 필터링",/협업\s*필터링/],["교차 검증",/교차\s*검증/],["하이퍼파라미터 튜닝",/하이퍼\s*파라미터를?\s*튜닝/],["회귀",/회귀/],["분류",/분류/],["군집",/군집|클러스터링/]];
+// The details of a project, pulled out of the sentence. They are saved with the project and show as its tags.
+function projectTags(all) {
+  const tags = [];
+  const made = /([가-힣A-Za-z ]{2,24})(모델|서비스|시스템|화면|앱)(?=[을를])/.exec(all);
+  if (made) tags.push(["목적", [made[1].split(/기반|하고|해서|으로|에서/).pop().trim() + " " + made[2]]]);
+  if (/팀원|팀\s|팀과/.test(all)) tags.push(["형태", ["팀 프로젝트"]]);
+  const data = /(?:[가-힣A-Za-z]+\s){0,2}데이터\s*[\d,.]+\s*만?\s*건/.exec(all);
+  if (data) tags.push(["데이터", [data[0]]]);
+  const methods = projectMethods.filter(([,pattern]) => pattern.test(all)).map(([name]) => name);
+  if (methods.length) tags.push(["기법", methods]);
+  const gain = /(RMSE|정확도|F1)[^.\n]*?(\d[\d.]*%?)에서\s*(\d[\d.]*%?)/.exec(all);
+  if (gain) tags.push(["성과", [gain[1] + " " + gain[2] + " → " + gain[3]]]);
+  return tags;
+}
+export function extractProject(text, matches) {
+  const done = completedClauses(text);
+  if (!done.some(part => built.test(part))) return null;
+  const all = done.join("\n");
+  const first = [...matches].sort((a,b) => text.indexOf(a.trigger) - text.indexOf(b.trigger))[0];
+  const kind = (projectKinds.find(([,pattern]) => pattern.test(all)) || ["구현"])[0];
+  return {name:[first ? skills[first.id].name : "", kind, "프로젝트"].filter(Boolean).join(" "), tags:projectTags(all)};
 }
 
 export function extractSkills(text) {
