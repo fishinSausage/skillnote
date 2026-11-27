@@ -526,7 +526,7 @@
         } catch (err) { /* storage unavailable: nothing to clear */ }
         const side = document.getElementById('demo-side');
         side.innerHTML = '<p class="demo-side-empty">UML 다이어그램 자리</p>';
-        if (demoInitialized) frame.src = frame.src;
+        if (demoInitialized) frame.srcdoc = frame.srcdoc;
       };
       const request = scope.indexedDB.deleteDatabase('skillnote-journal');
       request.onsuccess = finish;
@@ -542,9 +542,12 @@
         const binary = atob(PROTOTYPE_B64);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const blob = new Blob([bytes], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        document.getElementById('demo-frame').src = url;
+        // The app is loaded with srcdoc, not a blob: URL. When this file is opened straight from disk,
+        // a blob: page is treated as a stranger and the browser refuses it storage, so the app could
+        // not open its saved data. A srcdoc page shares this page's storage. The <base> keeps the
+        // app's own "#..." links inside the phone instead of loading this page into it.
+        const html = new TextDecoder('utf-8').decode(bytes).replace('<head>', '<head><base href="about:srcdoc">');
+        document.getElementById('demo-frame').srcdoc = html;
       } catch (err) {
         console.error(err);
         document.getElementById('demo-frame').srcdoc = '<p style="padding:20px;color:red;">프로토타입 로드 실패</p>';
