@@ -1,10 +1,17 @@
-import {activitySentence, completedClauses, extractSkills, jobs, skills} from "./catalog.js?v=18";
+import {activitySentence, aspectsFor, completedClauses, extractSkills, jobs, skills} from "./catalog.js?v=18";
 import {icon} from "./icons.js";
 import {readActivities, writeActivity} from "./storage.js?v=18";
+import {proposeSync, snapshot} from "./eclass.js?v=18";
 
 const main = document.querySelector("main");
 const dialog = document.querySelector("dialog");
-const shortDate = new Intl.DateTimeFormat("ko-KR", {month:"long", day:"numeric"});
+const dayFormat = new Intl.DateTimeFormat("ko-KR", {month:"long", day:"numeric"});
+const yearFormat = new Intl.DateTimeFormat("ko-KR", {year:"numeric", month:"long", day:"numeric"});
+// Synced activities can be years old, so dates outside this year show the year.
+const shortDate = {format:time => (new Date(time).getFullYear() === new Date().getFullYear() ? dayFormat : yearFormat).format(time)};
+const syncKinds = {syllabus:"수업계획서", submission:"과제 제출물"};
+// The two entry types (see SPEC.md): skills come from 수업계획서, projects from 과제 제출물.
+const syncTypes = {syllabus:"스킬", submission:"프로젝트"};
 const guideKinds = [["도서","book"],["강의","play"],["세미나","mic"]];
 const escape = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const blank = () => ({text:"", project:false, suggestions:null, selected:new Set(), original:null, returnTo:""});
@@ -19,6 +26,12 @@ let messageTimer;
 let loadSequence = 0;
 let evidence = new Map();
 let criterionEvidence = new Map();
+let sync = null;
+let syncRun = 0;
+let listProjects = false;
+// Synced matches carry the sub-skills the model named; hand-written ones fall back to the catalog rules.
+const matchAspects = (activity,item) => item.aspects ?? aspectsFor(item.id, activity.text);
+const aspectChips = names => names.length ? `<div class="aspects">${names.map(name => `<span class="aspect">${escape(name)}</span>`).join("")}</div>` : "";
 const eligibilityPrefix = "skillnote-eligibility:";
 const careerKey = "skillnote-redblue-career";
 const eligibilityKey = (job, group) => job.id === "redblue-375632" && group.id === "career"
@@ -37,6 +50,7 @@ function route() {
 function syncIndex() {
   evidence = new Map();
   for (const activity of activities) {
+    if (activity.off) continue;
     for (const item of activity.matches) {
       if (!evidence.has(item.id)) evidence.set(item.id, []);
       evidence.get(item.id).push({activity, item});
@@ -44,11 +58,12 @@ function syncIndex() {
   }
   const completed = new Map(activities.map(activity => [activity, completedClauses(activity.text).join("\n")]));
   criterionEvidence = new Map(jobs.flatMap(job => job.requirements).map(criterion => {
-    const [id,,patterns,,,mode,skill = id] = criterion;
+    const [id,,patterns,,,mode,skill = id,aspect] = criterion;
     if (mode === "eligibility") return [criterion, []];
     const matches = (evidence.get(skill) || []).filter(({activity,item}) =>
       (mode !== "project" || activity.project === true)
       && skills[skill].pattern.test(item.trigger)
+      && (!aspect || matchAspects(activity,item).includes(aspect))
       && patterns.every(pattern => pattern.test(completed.get(activity))));
     return [criterion, matches];
   }));
@@ -94,20 +109,152 @@ function composer() {
     <button class="primary" data-action="extract" ${draft.suggestions !== null ? "hidden" : ""}>${icon("spark")}스킬 추출</button></div></div>
     <div id="review-slot">${review()}</div></section>`;
 }
-function activityList() {
-  return activities.map(a => `<article class="entry"><div class="entry-meta">${icon("calendar")}${shortDate.format(a.created)}${a.project ? " · 프로젝트" : ""}<div class="entry-tools"><button data-action="edit" data-id="${escape(a.id)}">수정</button><button data-action="delete" data-id="${escape(a.id)}">삭제</button></div></div>
-    <p>${escape(a.text)}</p>${a.matches.length ? `<div class="chips">${a.matches.map(m=>chip(m.id)).join("")}</div>` : ""}</article>`).join("");
+// A project shows as its name; pressing it opens the tags attached to it.
+function projectBody(a) {
+  const cut = a.source ? a.text.indexOf(": ") : -1;
+  const name = cut > 0 ? a.text.slice(0, cut) : a.text.split(/[.\n]/)[0];
+  const from = a.source || {};
+  const subs = [...new Set(a.matches.flatMap(item => matchAspects(a,item)))];
+  const rows = [
+    ["스킬", a.matches.map(m => chip(m.id)).join("")],
+    ["세부 역량", subs.map(sub => `<span class="aspect">${escape(sub)}</span>`).join("")],
+    ["목적", from.purpose ? escape(from.purpose) : ""],
+    ["형태", [from.team ? "팀 프로젝트" : "", from.count > 1 ? from.count + "회 제출" : ""].filter(Boolean).join(" · ")],
+    ["출처", from.course ? escape([from.course, from.term, from.origin].filter(Boolean).join(" · ")) : ""]
+  ].filter(([,value]) => value).map(([label,value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("");
+  return `<details class="project-card"><summary><strong>${escape(name)}</strong>${icon("chev")}</summary><p>${escape(cut > 0 ? a.text.slice(cut + 2) : a.text)}</p><dl>${rows}</dl></details>`;
+}
+function activityList(projects) {
+  return activities.filter(a => !projects || a.project).map(a => `<article class="entry ${a.off ? "off" : ""}"><div class="entry-meta">${icon("calendar")}${shortDate.format(a.created)}${a.project ? " · 프로젝트" : ""}${a.source ? " · eclass " + syncKinds[a.source.type] : ""}<div class="entry-tools"><button data-action="edit" data-id="${escape(a.id)}">수정</button><label class="entry-use"><input type="checkbox" data-activity-use="${escape(a.id)}" ${a.off ? "" : "checked"}>반영</label></div></div>
+    ${a.project ? projectBody(a) : `<p>${escape(a.text)}</p>${a.matches.length ? `<div class="chips">${a.matches.map(m=>chip(m.id)).join("")}</div>` : ""}`}</article>`).join("");
+}
+function openActivities(projects = listProjects, keep = false) {
+  listProjects = projects;
+  const shown = activities.filter(a => !projects || a.project);
+  const top = keep ? dialog.scrollTop : 0;
+  const anyOn = shown.some(a => !a.off);
+  openDialog(projects ? "프로젝트" : "전체 기록", shown.length
+    ? `<div class="list-tools"><span>체크를 풀면 스킬 보드와 공고 확인에서 빠져요.</span><button class="text-button" data-action="use-all" data-use="${anyOn ? "off" : "on"}">${anyOn ? "모두 해제" : "모두 선택"}</button></div>${activityList(projects)}`
+    : `<p>${projects ? "프로젝트로 표시한 활동이 없어요." : "저장한 기록이 없어요."}</p>`);
+  dialog.scrollTop = top;
+}
+async function setUse(targets, off) {
+  if (saving || !targets.length) return;
+  saving = true;
+  let failure = "";
+  for (const activity of targets) {
+    try { await writeActivity(activity.id, activity.revision, {...activity, off}); }
+    catch(error) { failure = error.message; }
+  }
+  saving = false;
+  await refresh(false);
+  channel?.postMessage("changed");
+  render();
+  openActivities(listProjects, true);
+  if (failure) notice(failure);
 }
 function board() {
   const chips = [...evidence.keys()].map(id => `<button class="chip" data-action="evidence" data-skill="${id}" aria-haspopup="dialog">${skills[id].name}</button>`).join("");
   if (!loaded) return `<section class="card board">${heading("layers","나의 스킬 보드")}<p class="state-message">${loadError ? '활동을 불러오지 못했어요. <button class="text-button" data-action="retry">다시 시도</button>' : "활동을 불러오는 중이에요."}</p></section>`;
   return `<section class="card board">${heading("layers","나의 스킬 보드")}
-    <div class="stats"><button data-action="skills" aria-haspopup="dialog"><span>보유 스킬 ${icon("chev")}</span><strong>${evidence.size}<small>개</small></strong></button><button data-action="activities" aria-haspopup="dialog"><span>기록한 활동 ${icon("chev")}</span><strong>${activities.length}<small>개</small></strong></button></div>
-    ${chips ? `<div class="chips">${chips}</div>` : '<p class="board-note">활동에서 찾은 스킬이 여기에 모여요.</p>'}</section>`;
+    <div class="stats"><button data-action="skills" aria-haspopup="dialog"><span>보유 스킬 ${icon("chev")}</span><strong>${evidence.size}<small>개</small></strong></button><button data-action="projects" aria-haspopup="dialog"><span>프로젝트 ${icon("chev")}</span><strong>${activities.filter(a => a.project && !a.off).length}<small>개</small></strong></button></div>
+    ${chips ? `<div class="chips">${chips}</div>` : '<p class="board-note">기록에서 찾은 스킬이 여기에 모여요.</p>'}
+    <button class="text-button board-all" data-action="activities" aria-haspopup="dialog">전체 기록 보기</button></section>`;
+}
+function syncCard() {
+  const synced = activities.filter(a => a.source?.from === "eclass").length;
+  return `<section class="card sync-card">${heading("sync","eclass 동기화")}
+    <p>수업계획서의 주차별 학습과 과제 제출물에서 스킬과 프로젝트를 찾아 한 번에 추가해요.</p>
+    <button class="primary" data-action="sync-open" aria-haspopup="dialog" ${loaded ? "" : "disabled"}>${icon("sync")}eclass에서 가져오기</button>
+    <small>프로토타입 · ${snapshot.takenAt.replaceAll("-",".")} 스냅샷 · 과목 ${snapshot.courses.length}개${synced ? " · 가져온 항목 " + synced + "개" : ""}</small></section>`;
+}
+function syncTotals() {
+  const chosen = sync.items.filter(item => item.include);
+  return {chosen, skills:new Set(chosen.flatMap(item => [...item.selected])), projects:chosen.filter(item => item.project).length};
+}
+function syncFootText() {
+  const {skills,projects} = syncTotals();
+  return `스킬 <b>${skills.size}</b>종 · 프로젝트 <b>${projects}</b>개`;
+}
+function syncItem(item, index) {
+  const meta = [syncKinds[item.type], item.origin ? escape(item.origin) : "", item.type === "syllabus" ? item.count + "주" : shortDate.format(item.created), item.type === "submission" && item.count > 1 ? item.count + "회 제출" : ""].filter(Boolean).join(" · ");
+  const fresh = id => skills[id].learned ? '<i class="new-skill">새 스킬</i>' : "";
+  // A skill entry lists each skill with its own checkbox; a project entry is one unit and only names the skills it used.
+  const body = item.type === "syllabus"
+    ? item.matches.map(match => `<label class="sync-skill"><input type="checkbox" data-sync-skill="${index}" value="${match.id}" ${item.selected.has(match.id) ? "checked" : ""}>
+    <span><strong>${skills[match.id].name}${fresh(match.id)}</strong><small>${escape(match.excerpt)}</small>${match.aspects.length ? `<small>세부 역량 · ${match.aspects.map(escape).join(", ")}</small>` : ""}</span></label>`).join("")
+    : `<p>${escape(item.text.slice(item.title.length + 2))}</p>${item.matches.length ? `<div class="chips"><small>사용 스킬</small>${item.matches.map(match => `<span class="chip">${skills[match.id].name}${fresh(match.id)}</span>`).join("")}</div>` : ""}`;
+  return `<article class="sync-item"><label class="sync-head"><input type="checkbox" data-sync-item="${index}" ${item.include ? "checked" : ""}>
+    <span><strong><i class="sync-type ${item.type}">${syncTypes[item.type]}</i>${escape(item.title)}</strong><small>${meta}</small></span></label>
+    <fieldset ${item.include ? "" : "disabled"}>${body}</fieldset></article>`;
+}
+function syncReview(result) {
+  sync = result;
+  const skipped = [result.empty ? "스킬이나 프로젝트가 아닌 항목 " + result.empty + "개" : "", result.known ? "이미 가져온 항목 " + result.known + "개" : ""].filter(Boolean).join(", ");
+  if (!result.items.length) {
+    openDialog("eclass 동기화",`<p>새로 가져올 항목이 없어요.${skipped ? " " + skipped + "는 제외했어요." : ""}</p>`);
+    return;
+  }
+  const courses = [...new Set(result.items.map(item => item.course))].map(name => {
+    const entries = result.items.map((item,index) => [item,index]).filter(([item]) => item.course === name);
+    return `<section class="sync-course"><h3>${escape(name)}<span>${entries[0][0].term}</span></h3>${entries.map(([item,index]) => syncItem(item,index)).join("")}</section>`;
+  }).join("");
+  openDialog("가져올 항목 확인",`<div class="sync"><div class="sync-body">
+    <div class="sync-intro"><p>수업계획서에서 찾은 <b>스킬</b>과 과제 제출물에서 찾은 <b>프로젝트</b>예요. 맞지 않는 항목은 체크를 풀어 주세요.</p>
+      <label class="sync-all"><input type="checkbox" data-sync-all checked>전체 선택</label></div>
+    ${courses}${skipped ? `<p class="sync-skipped">${skipped}는 제외했어요.</p>` : ""}</div>
+    <div class="sync-foot"><span id="sync-count">${syncFootText()}</span><div class="actions"><button class="subtle" data-action="close">취소</button><button class="primary" data-action="sync-apply">${icon("check")}선택한 항목 추가</button></div></div></div>`);
+  dialog.querySelector(".sync-body").scrollTop = 0;
+}
+function syncRefresh() {
+  const {chosen} = syncTotals();
+  const all = dialog.querySelector("[data-sync-all]");
+  all.checked = chosen.length === sync.items.length;
+  all.indeterminate = chosen.length > 0 && !all.checked;
+  dialog.querySelector("#sync-count").innerHTML = syncFootText();
+  dialog.querySelector('[data-action="sync-apply"]').disabled = !chosen.length;
+}
+function openSync() {
+  const run = ++syncRun;
+  const steps = ["eclass에 연결하는 중","수업계획서와 과제 제출물을 불러오는 중","LLM이 스킬과 프로젝트를 추출하는 중"];
+  openDialog("eclass 동기화",`<ol class="sync-steps">${steps.map((step,index) => `<li class="${index ? "" : "now"}">${step}</li>`).join("")}</ol>`);
+  const result = proposeSync(new Set(activities.map(a => a.id)));
+  // The pauses stand in for the network and model calls a real connection would make.
+  steps.forEach((_, index) => setTimeout(async () => {
+    if (run !== syncRun || !dialog.open) return;
+    const items = dialog.querySelectorAll(".sync-steps li");
+    if (index + 1 < steps.length) {
+      items[index].className = "done";
+      items[index + 1].className = "now";
+    } else {
+      try { syncReview(await result); }
+      catch { dialog.close(); notice("eclass 항목을 불러오지 못했어요."); }
+    }
+  }, 550 * (index + 1)));
+}
+async function applySync() {
+  if (saving || !sync) return;
+  saving = true;
+  const {chosen,skills:added,projects} = syncTotals();
+  let failure = "";
+  for (const item of chosen) {
+    try {
+      await writeActivity(item.id, 0, {id:item.id, created:item.created, text:item.text, project:item.project,
+        matches:item.matches.filter(match => item.selected.has(match.id)).map(({id,trigger,excerpt,aspects}) => aspects.length ? {id,trigger,excerpt,aspects} : {id,trigger,excerpt}),
+        source:{from:"eclass", type:item.type, course:item.course, term:item.term,
+          ...(item.type === "submission" ? {origin:item.origin, purpose:item.purpose, team:item.team, count:item.count} : {})}});
+    } catch(error) { failure = error.message; }
+  }
+  saving = false;
+  dialog.close();
+  await refresh(false);
+  channel?.postMessage("changed");
+  render();
+  notice(failure || `eclass에서 스킬 ${added.size}종과 프로젝트 ${projects}개를 추가했어요.`);
 }
 function logo(job) { return `<span aria-hidden="true" class="company-mark ${job.color}">${job.mark}</span>`; }
 function journal() {
-  return `<div class="dashboard">${composer()}${board()}</div>`;
+  return `<div class="dashboard">${composer()}<div class="side">${board()}${syncCard()}</div></div>`;
 }
 const hasCriterionEvidence = (job,group,criterion) => criterion[5] === "eligibility"
   ? criterion[0] === selectedEligibility(eligibilityKey(job,group)) : Boolean(criterionEvidence.get(criterion)?.length);
@@ -142,7 +289,7 @@ function requirementRow(job,group,row) {
   const hint = matched ? `${mode === "project" ? "프로젝트" : "활동"} ${count}개에서 확인`
     : mode === "project" ? "프로젝트 기록 없음 · 준비 방법 보기" : "활동 근거 없음 · 준비 방법 보기";
   return `<a href="#jobs/${job.id}/${id}" class="skill-row"><span class="check-indicator ${matched ? "matched" : ""}">${matched ? icon("check") : ""}</span>
-    <span class="grow"><strong>${title}</strong><small>${hint}</small></span>${icon("chev")}</a>`;
+    <span class="grow"><strong>${title}${row[7] ? `<span class="aspect">${row[7]}</span>` : ""}</strong><small>${hint}</small></span>${icon("chev")}</a>`;
 }
 function requirementGroup(job,group) {
   if (!group.operator) return requirementRow(job,group,group.options[0]);
@@ -179,7 +326,7 @@ function evidenceRows(matches) {
       const start = excerptStart + triggerOffset;
       body = escape(text.slice(0, start)) + "<strong>" + escape(item.trigger) + "</strong>" + escape(text.slice(start + item.trigger.length));
     }
-    return `<div class="evidence-row"><small>${shortDate.format(activity.created)}${activity.project ? " · 프로젝트" : ""}</small><blockquote>${body}</blockquote></div>`;
+    return `<div class="evidence-row"><small>${shortDate.format(activity.created)}${activity.project ? " · 프로젝트" : ""}</small>${item ? aspectChips(matchAspects(activity,item)) : ""}<blockquote>${body}</blockquote></div>`;
   }).join("");
 }
 function selectOwnedSkill(id) {
@@ -191,7 +338,12 @@ function selectOwnedSkill(id) {
     tab.tabIndex = tab === selected ? 0 : -1;
   }
   panel.setAttribute("aria-labelledby", selected.id);
-  panel.innerHTML = `<h3>${skills[id].name}</h3><p class="owned-count">연결된 활동 ${evidence.get(id).length}개</p>${evidenceRows(evidence.get(id))}`;
+  const counts = new Map();
+  for (const {activity,item} of evidence.get(id)) {
+    for (const name of matchAspects(activity,item)) counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  const spread = counts.size ? `<h4>세부 역량 <span class="count">${counts.size}</span></h4><div class="aspects">${[...counts].map(([name,total]) => `<span class="aspect">${escape(name)}${total > 1 ? ` <b>${total}</b>` : ""}</span>`).join("")}</div><h4>연결된 활동</h4>` : "";
+  panel.innerHTML = `<h3>${skills[id].name}</h3><p class="owned-count">연결된 활동 ${evidence.get(id).length}개</p>${spread}${evidenceRows(evidence.get(id))}`;
   panel.scrollTop = 0;
   selected.focus();
 }
@@ -205,9 +357,9 @@ function openOwnedSkills(id) {
   selectOwnedSkill(evidence.has(id) ? id : evidence.keys().next().value);
 }
 function criterionDetail(job,criterion) {
-  const [,title,,project,guide] = criterion;
+  const [,title,,project,guide,,,aspect] = criterion;
   const matches = criterionEvidence.get(criterion) || [];
-  const intro = `${backLink("jobs/"+job.id,job.role)}<div class="card skill-intro"><div class="eyeline"><span class="tile">${icon(matches.length ? "check" : "target")}</span>자격요건</div><h1>${title}</h1></div>`;
+  const intro = `${backLink("jobs/"+job.id,job.role)}<div class="card skill-intro"><div class="eyeline"><span class="tile">${icon(matches.length ? "check" : "target")}</span>자격요건</div><h1>${title}${aspect ? " · " + aspect : ""}</h1></div>`;
   if (matches.length) return `<div class="detail">${intro}<section class="card">${heading("journal","연결된 활동")}${evidenceRows(matches)}</section></div>`;
   const resources = guide ? `<section class="card guide">${heading("book","관련 학습 자료")}
     ${skills[guide].resources.map(([name,url,note],i)=>`<article class="resource"><span class="resource-type">${icon(guideKinds[i][1])}${guideKinds[i][0]}</span><a class="resource-link" href="${escape(url)}" target="_blank" rel="noopener noreferrer">${escape(name)}${icon("external")}</a><p>${note}</p></article>`).join("")}</section>` : "";
@@ -288,6 +440,11 @@ document.addEventListener("change", event => {
     draft.project = event.target.checked;
     return;
   }
+  if (event.target.matches("[data-activity-use]")) {
+    const activity = activities.find(item => item.id === event.target.dataset.activityUse);
+    if (activity) setUse([activity], !event.target.checked);
+    return;
+  }
   if (event.target.matches("[data-eligibility]")) {
     const control = event.target;
     const {eligibility:key,option} = control.dataset;
@@ -301,6 +458,28 @@ document.addEventListener("change", event => {
     document.querySelector(`[data-eligibility="${key}"][data-option="${option}"]`)?.focus();
     return;
   }
+  if (sync && event.target.closest(".sync")) {
+    if (event.target.matches("[data-sync-all]")) {
+      for (const [index,item] of sync.items.entries()) {
+        item.include = event.target.checked;
+        const box = dialog.querySelector(`[data-sync-item="${index}"]`);
+        box.checked = item.include;
+        box.closest(".sync-item").querySelector("fieldset").disabled = !item.include;
+      }
+      syncRefresh();
+      return;
+    }
+    const {syncItem:itemIndex, syncSkill} = event.target.dataset;
+    const item = sync.items[itemIndex ?? syncSkill];
+    if (itemIndex !== undefined) {
+      item.include = event.target.checked;
+      event.target.closest(".sync-item").querySelector("fieldset").disabled = !item.include;
+    } else if (syncSkill !== undefined) {
+      if (event.target.checked) item.selected.add(event.target.value); else item.selected.delete(event.target.value);
+    }
+    syncRefresh();
+    return;
+  }
   if (!event.target.matches("input[data-skill]")) return;
   const {skill}=event.target.dataset;
   if (event.target.checked) draft.selected.add(skill); else draft.selected.delete(skill);
@@ -308,10 +487,13 @@ document.addEventListener("change", event => {
 document.addEventListener("click", event => {
   const el=event.target.closest("[data-action]");
   if (!el) return;
-  const {action,id,skill,filter}=el.dataset;
+  const {action,id,skill,filter,use}=el.dataset;
   if (action === "close") dialog.close();
   else if (action === "confirm") {const run=modalAction; dialog.close(); run?.();}
   else if (action === "retry") refresh();
+  else if (action === "sync-open") openSync();
+  else if (action === "sync-apply") {el.disabled=true; applySync();}
+
   else if (action === "load-sentence") discardThen(()=>{draft.text=activitySentence; draft.suggestions=null; render(); editFocus();});
   else if (action === "extract") {
     const input=document.querySelector("#activity");
@@ -325,15 +507,13 @@ document.addEventListener("click", event => {
     document.querySelector("#review-title").focus();
   } else if (action === "save" && draft.suggestions !== null) {el.disabled=true; persist();}
   else if (action === "filter") {jobFilter=filter; render(); document.querySelector('[aria-pressed="true"]').focus({preventScroll:true});}
-  else if (action === "activities") openDialog("기록한 활동",activityList() || "<p>저장한 활동이 없어요.</p>");
+  else if (action === "activities" || action === "projects") openActivities(action === "projects");
+  else if (action === "use-all") setUse(activities.filter(a => (!listProjects || a.project) && Boolean(a.off) !== (use === "off")), use === "off");
   else if (action === "skills" || action === "evidence") openOwnedSkills(skill);
   else if (action === "select-skill") selectOwnedSkill(skill);
   else if (action === "edit") {
     const a=activities.find(item=>item.id===id);
     if (a) {dialog.close(); discardThen(()=>useDraft({...blank(),text:a.text,project:a.project === true,original:a}));}
-  } else if (action === "delete") {
-    const a=activities.find(item=>item.id===id);
-    if (a) openDialog("활동을 삭제할까요?",`<p>이 활동만 뒷받침하던 스킬은 공고 체크리스트에서도 해제돼요.</p>${dialogActions("삭제하기",true)}`,()=>persist(a));
   } else if (action === "cancel-edit") {
     const back=draft.returnTo;
     draft=blank(); if(back) location.hash=back; else render();
@@ -342,6 +522,7 @@ document.addEventListener("click", event => {
     discardThen(()=>useDraft({...blank(),project:true,returnTo:"jobs/"+job.id}));
   }
 });
+dialog.addEventListener("close", () => { sync = null; syncRun++; });
 dialog.addEventListener("keydown", event => {
   const tab = event.target.closest('[role="tab"]');
   if (!tab || !["ArrowUp","ArrowDown","Home","End"].includes(event.key)) return;

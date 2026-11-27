@@ -21,6 +21,8 @@ const paths = {
   list:'<path d="M8 6h12M8 12h9M8 18h6M4 6h.1M4 12h.1M4 18h.1"/>',
   target:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
   bag:'<rect x="4" y="6" width="16" height="15" rx="3"/><path d="M8 7V5a4 4 0 0 1 8 0v2m-9 5h10"/>',
+  sync:'<path d="M20 11a8 8 0 0 0-14.3-4.5M5 3v4h4M4 13a8 8 0 0 0 14.3 4.5M19 21v-4h-4"/>',
+  alert:'<path d="M12 4 3 20h18L12 4Zm0 6v4m0 3h.01"/>',
   archive:'<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9m-9 4h4"/>'
 };
 export function icon(id) {

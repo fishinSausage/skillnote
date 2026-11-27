@@ -120,8 +120,9 @@ const frontend = /프론트엔드|화면|컴포넌트|frontend/i;
 const sqlWork = /SQL|쿼리|조회|집계|SELECT/i;
 const verified = /검증|테스트|검토|비교|추적|오류|원인|확인/i;
 
-const check = (id, title, practice, {skill = id, mode = "skill", guide = "", patterns = []} = {}) =>
-  [id,title,patterns,practice,guide,mode,skill];
+// `aspect` narrows a requirement to one sub-skill, e.g. Python · 데이터 분석.
+const check = (id, title, practice, {skill = id, mode = "skill", guide = "", patterns = [], aspect = ""} = {}) =>
+  [id,title,patterns,practice,guide,mode,skill,aspect];
 const eligible = (id, title) => [id,title,[],"","","eligibility"];
 const group = (id,title,operator,...options) => ({id,title,operator,options});
 const single = option => ({id:option[0],options:[option]});
@@ -190,8 +191,8 @@ const postingCriteria = {
         check("sheets","Google Sheets","Google Sheets에서 채널별 판매 자료를 집계하세요.",{guide:"clean"}),
         check("clean","원본 데이터 구조화","누락값과 중복 행을 확인하고 상품 코드 형식을 통일하세요.",{guide:"clean"})),
       group("analysis-tools","데이터 분석 도구 기본기","xor",
-        check("sql","SQL","SQL로 채널별 월간 매출을 집계하세요.",{guide:"sql"}),
-        check("python","Python","Python으로 채널별 월간 매출을 집계하세요.",{guide:"python"})),
+        check("sql","SQL","SQL로 채널별 월간 매출을 집계하세요.",{guide:"sql",aspect:"집계"}),
+        check("python","Python","Python으로 채널별 월간 매출을 집계하세요.",{guide:"python",aspect:"데이터 분석"})),
       single(check("ai-tools","업무에서 AI 도구 활용","Claude나 ChatGPT로 분석 요약을 작성하고 원본 수치와 대조하세요.",{patterns:[/분석|리포트|정제|요약|업무/i]}))
     ],
     interview:[
@@ -309,13 +310,28 @@ export const jobs = [
   })
   .sort((left, right) => (left.deadline || "9999").localeCompare(right.deadline || "9999"));
 
-export const activitySentence = "수업에서 Python으로 설문 응답의 결측치를 정리했다.";
+export const activitySentence = "수업에서 Python으로 설문 응답의 결측치를 정리했다. Excel로 응답을 분류하고 Google Sheets로 팀별 응답 수를 집계했다.";
 const planned = /예정|계획|(?:배울|익힐|공부할|만들|쓸|해볼|할)\s*(?:것|거|생각)|할\s*수\s*없|하려(?:고|는)|싶(?:다|어|습니다)|아직|못\s*(?:했|해|하)|지\s*(?:않|못)|(?:다음\s*(?:학기|주|달)|앞으로).*?(?:배울|할|쓸|만들|공부)|\b(?:will|want to|plan(?:ning)? to|hope to|haven't|didn't|did not|not yet)\b/i;
 
 export function completedClauses(text) {
   return text.split(/(?<![a-z0-9])\.|\.(?![a-z0-9])|[!?。！？\n]+|[,;](?=\s)|(?<=했지만|했고|했으며|했고요)\s+|\s+(?:하지만|그리고|but|and then)\s+/i)
     .map(part => part.trim())
     .filter(part => part && !planned.test(part));
+}
+
+// Sub-skills for activities that carry none of their own (hand-written ones). A real model would name these itself.
+const aspectRules = {
+  python:[["데이터 분석",/결[측손]치|설문|집계|통계|평균|분석|pandas|데이터/i],["백엔드",/FastAPI|Django|서버|\bAPI\b/i],["자동화",/자동화|스크립트/]],
+  sql:[["집계",/집계|group by|건수|평균/i],["JOIN",/\bJOIN\b|조인/i]],
+  git:[["브랜치",/브랜치|branch|병합|merge/i],["코드 리뷰",/리뷰|풀\s*리퀘스트|pull request/i]],
+  react:[["화면 구현",/화면|컴포넌트/]],
+  viz:[["그래프",/그래프|도표|차트/]],
+  clean:[["결측치 처리",/결[측손]치|누락값/],["중복 제거",/중복/]],
+  java:[["백엔드",/백엔드|서버|\bAPI\b/i]]
+};
+export function aspectsFor(id, text) {
+  const done = completedClauses(text).join("\n");
+  return (aspectRules[id] || []).filter(([,pattern]) => pattern.test(done)).map(([name]) => name);
 }
 
 export function extractSkills(text) {
