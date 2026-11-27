@@ -43,11 +43,11 @@
       padding: 8px 16px; font-weight: 600; cursor: pointer; color: var(--ink);
     }
     .tab.active { background: var(--blue); color: white; border-color: var(--blue); }
-    #fullscreen-btn {
+    #fullscreen-btn, #reset-btn {
       background: white; border: 1px solid var(--line); border-radius: 10px;
       padding: 8px 14px; font-weight: 600; cursor: pointer;
     }
-    #fullscreen-btn:hover { background: var(--blue-soft); }
+    #fullscreen-btn:hover, #reset-btn:hover { background: var(--blue-soft); }
 
     .view { display: none; }
     .view.active { display: block; }
@@ -178,6 +178,7 @@
     <div class="tabs">
       <button class="tab active" data-view="pdf">PDF 슬라이드</button>
       <button class="tab" data-view="demo">스킬노트 데모 (휴대폰)</button>
+      <button id="reset-btn" title="데모에 저장된 스킬과 프로젝트를 지우고 처음 상태로 되돌립니다">↺ 데모 초기화</button>
       <button id="fullscreen-btn">⛶ 전체화면</button>
     </div>
   </header>
@@ -511,6 +512,25 @@
     window.addEventListener("message", event => {
       if (event.source !== document.getElementById("demo-frame").contentWindow) return;
       if (event.data && event.data.source === "skillnote") showDiagram(event.data.event);
+    });
+
+    // Wipes everything the demo saved in this browser (synced and written entries, ticked job conditions)
+    // and reloads the phone, so the demo can be run again from the start.
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      const frame = document.getElementById('demo-frame');
+      let scope = window;
+      try { if (frame.contentWindow && frame.contentWindow.indexedDB) scope = frame.contentWindow; } catch (err) { /* fall back to this page's storage */ }
+      const finish = () => {
+        try {
+          Object.keys(scope.localStorage).filter(key => key.startsWith('skillnote-')).forEach(key => scope.localStorage.removeItem(key));
+        } catch (err) { /* storage unavailable: nothing to clear */ }
+        const side = document.getElementById('demo-side');
+        side.innerHTML = '<p class="demo-side-empty">UML 다이어그램 자리</p>';
+        if (demoInitialized) frame.src = frame.src;
+      };
+      const request = scope.indexedDB.deleteDatabase('skillnote-journal');
+      request.onsuccess = finish;
+      request.onerror = finish;
     });
 
     let demoInitialized = false;

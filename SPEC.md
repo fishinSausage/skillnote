@@ -80,6 +80,7 @@ Guessed skills are left out. Examples: guessing Python because a machine-learnin
   - A posting, or one of its requirements → 공고 자격요건 매칭 diagram, all six steps lit
   - 채용 공고 tab (the list) → 채용 공고 수집 → 매칭 diagram, steps 4–7 lit. Steps 1–3 are the server's background crawl of job sites; no button lights them, so they always stay darkened.
 - Outside systems each get their own lifeline and sit at the far right: eclass (courses) and 원티드 (job postings).
+- **↺ 데모 초기화** in the header wipes everything the demo saved in this browser and reloads the phone, so the demo (including the one-time eclass sync) can be replayed.
 - **No explanatory notes or disclaimers on the slides or diagrams** (nothing like "목표 설계입니다…"). Only a title and the diagram.
 
 ## 9. Prototype limits
