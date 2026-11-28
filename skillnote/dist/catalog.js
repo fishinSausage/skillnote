@@ -127,8 +127,60 @@ const eligible = (id, title) => [id,title,[],"","","eligibility"];
 const group = (id,title,operator,...options) => ({id,title,operator,options});
 const single = option => ({id:option[0],options:[option]});
 
+const learningGuides = {
+  java:[
+    ["Dev.java · Classes and Objects","https://dev.java/learn/language/oop/classes-objects/","예약이나 설문 응답을 클래스로 표현하고, 생성자와 메서드를 사용해 상태를 관리해 보세요.","공식 문서"],
+    ["Spring · RESTful Web Service","https://spring.io/guides/gs/rest-service/","Java 예제로 요청을 받고 JSON을 반환하는 컨트롤러를 만든 뒤, 조회 기능을 추가해 보세요.","공식 실습"]
+  ],
+  kotlin:[
+    ["Kotlin Tour · Classes","https://kotlinlang.org/docs/kotlin-tour-classes.html","클래스와 데이터 클래스를 익히고 예약이나 설문 응답을 모델링해 보세요.","공식 문서"],
+    ["Spring · RESTful Web Service","https://spring.io/guides/gs/rest-service/","가이드의 Kotlin 코드로 조회 API를 실행하고, 응답 필드를 바꿔 결과를 확인하세요.","공식 실습"]
+  ],
+  oop:[
+    ["Dev.java · Object Oriented Programming","https://dev.java/learn/language/oop/","센터·회원·예약이 각각 맡을 책임을 적고, 클래스와 인터페이스로 표현해 보세요.","공식 문서"]
+  ],
+  "data-structures":[
+    ["Java Collections · Map 인터페이스","https://docs.oracle.com/javase/tutorial/collections/interfaces/map.html","예약 목록 순회와 예약 ID 조회가 각각 필요한 경우를 만들어 List와 Map을 비교하세요.","공식 문서"]
+  ],
+  "web-operation":[
+    ["GitHub Pages · 빠른 시작","https://docs.github.com/en/pages/quickstart","정적 웹 화면을 배포한 뒤 배포 브랜치, 접속 주소, 수정 후 반영 여부를 기록하세요.","공식 실습"],
+    ["GitHub Actions · 빠른 시작","https://docs.github.com/en/actions/get-started/quickstart","워크플로 실행 결과를 확인하고 실패한 단계와 재실행 결과를 기록하세요.","공식 실습"]
+  ],
+  "code-verification":[
+    ["GitHub · AI 생성 코드 검토","https://docs.github.com/en/copilot/tutorials/review-ai-generated-code","생성된 코드의 전제와 한계를 확인하고, 빈 입력·경곗값·실패 입력에 대한 테스트를 준비하세요.","공식 실습"]
+  ],
+  "ai-tools":[
+    ["Google Sheets · Gemini로 데이터 분석하기","https://support.google.com/docs/answer/14356410?hl=ko","샘플 표를 요약하고, 요약 속 수치 두세 개를 원본 집계와 대조하세요.","공식 실습"]
+  ],
+  "project-delivery":[
+    ["GitHub · README 소개","https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes","README에 맡은 기능, 실행 방법, 입력 예시와 확인한 결과를 적으세요.","공식 문서"]
+  ],
+  "ai-docs":[
+    ["Claude · 프롬프트 작성 가이드","https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices","작업 절차와 출력 형식을 주고 문서 초안을 만든 뒤 실제 순서와 대조하세요.","공식 문서"],
+    ["GitHub · README 소개","https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes","분석의 입력, 실행 순서, 확인한 결과를 README로 정리하세요.","공식 문서"]
+  ],
+  "ai-automation":[
+    ["Python · CSV 파일 읽기와 쓰기","https://docs.python.org/3/library/csv.html","CSV를 읽어 반복 집계를 자동화하고, 누락값이나 중복 행이 있어도 예상한 결과가 나오는지 확인하세요.","공식 문서"]
+  ],
+  html:[
+    ["MDN · HTML로 문서 구조 만들기","https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Structuring_content/Structuring_documents","파일 목록을 제목, 본문, 목록과 버튼의 역할에 맞춰 구성하세요.","공식 실습"]
+  ],
+  css:[
+    ["MDN · CSS 레이아웃 입문","https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/CSS_layout/Introduction","Flexbox나 Grid로 파일 목록의 열과 간격을 정리해 보세요.","공식 실습"]
+  ],
+  responsive:[
+    ["MDN · 반응형 웹 디자인","https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/CSS_layout/Responsive_Design","같은 목록을 휴대폰에서는 한 열, 넓은 화면에서는 여러 열로 표시해 보세요.","공식 실습"]
+  ]
+};
+
+export function resourcesForCriterion(row) {
+  const [id,,,,guide,,skill] = row;
+  return skills[guide]?.resources ?? learningGuides[id] ?? learningGuides[skill] ?? skills[skill]?.resources ?? [];
+}
+
 const postingCriteria = {
   "redblue-375632": {
+    roadmap:[["version-control"],["fundamentals"],["language"],["web"],["database","sql","mysql"],["framework"]],
     groups:[
       {id:"career", title:"지원 경력", operator:"xor", options:[
         ["entry","신입",[],"","","eligibility"],
@@ -165,6 +217,7 @@ const postingCriteria = {
     ]
   },
   "binulabs-398515": {
+    roadmap:[["database"],["fullstack"],["code-verification"],["web-operation"]],
     employment:"정규직 전환형 인턴 6개월",
     groups:[
       single(eligible("related-degree","컴퓨터공학 또는 관련 전공 학사 이상")),
@@ -182,6 +235,7 @@ const postingCriteria = {
     ]
   },
   "beautyselection-396487": {
+    roadmap:[["spreadsheets","excel","clean","sheets"],["analysis-tools"],["ai-tools"]],
     employment:"전환형 인턴 3개월",
     groups:[
       group("academic-status","학적 조건","xor",
@@ -202,6 +256,7 @@ const postingCriteria = {
     ]
   },
   "opensurvey-394433": {
+    roadmap:[["backend-fundamentals","git","http","sql"],["jvm-backend"],["own-project"]],
     groups:[
       group("degree","컴퓨터 관련 학과 학사","xor",
         eligible("graduate","학사 학위 보유"),eligible("graduating","졸업 예정")),
@@ -219,6 +274,7 @@ const postingCriteria = {
     ]
   },
   "wantedlab-387428": {
+    roadmap:[["join"],["query-aggregation"],["query-debugging"],["ai-work"]],
     employment:"단기형 인턴 1년",
     groups:[
       single(check("join","SQL JOIN으로 여러 테이블 연결","이벤트와 사용자 테이블을 조인해 실험군별 행동을 집계하세요.",{skill:"sql-join",guide:"sql",patterns:[sqlWork]})),
@@ -239,6 +295,7 @@ const postingCriteria = {
     ]
   },
   "atci-348483": {
+    roadmap:[["git"],["responsive"],["language"],["frontend"],["rdbms"],["backend"],["rest"]],
     groups:[
       group("frontend","프론트엔드 개발 경험","xor",
         check("react","React 프론트엔드 프로젝트","React로 파일 목록과 필터 화면을 구현하세요.",{mode:"project",guide:"react",patterns:[frontend,codeWork]}),
@@ -270,7 +327,7 @@ export const jobs = [
   {
     id:"redblue-375632", company:"레드블루", mark:"R", color:"coral",
     role:"[바디코디] Backend Engineer (신입·주니어)", field:"백엔드", type:"신입·주니어", place:"서울 서초구",
-    deadline:"2026-11-27", sourceUrl:"https://recruit.wanted.co.kr/wd/375632", tags:["sql","api","git"],
+    deadline:"2026-11-27", closed:true, sourceUrl:"https://recruit.wanted.co.kr/wd/375632", tags:["sql","api","git"],
     description:"피트니스 운영 서비스의 예약, 결제, 정산 기능을 개발합니다. Spring 기반 API와 배치 작업을 다루고, MySQL 데이터 처리와 코드 리뷰에 참여합니다."
   },
   {
@@ -314,9 +371,20 @@ export const activitySentence = "머신러닝 수업에서 팀원 3명과 Python
 const planned = /예정|계획|(?:배울|익힐|공부할|만들|쓸|해볼|할)\s*(?:것|거|생각)|할\s*수\s*없|하려(?:고|는)|싶(?:다|어|습니다)|아직|못\s*(?:했|해|하)|지\s*(?:않|못)|(?:다음\s*(?:학기|주|달)|앞으로).*?(?:배울|할|쓸|만들|공부)|\b(?:will|want to|plan(?:ning)? to|hope to|haven't|didn't|did not|not yet)\b/i;
 
 export function completedClauses(text) {
-  return text.split(/(?<![a-z0-9])\.|\.(?![a-z0-9])|[!?。！？\n]+|[,;](?=\s)|(?<=했지만|했고|했으며|했고요)\s+|\s+(?:하지만|그리고|but|and then)\s+/i)
+  return text.split(/(?<![a-z0-9])\.|\.(?![a-z0-9])|[!?。！？\n]+|[,;](?=\s)|(?<=지만|했고|했으며|했고요)\s+|\s+(?:하지만|그리고|but|and then)\s+/i)
     .map(part => part.trim())
     .filter(part => part && !planned.test(part));
+}
+
+export function directClauses(text) {
+  const otherPerson = /(?:팀원|동료|친구|조원|선배|교수님)(?:이|가|은|는|의)(?=\s|$)|\b(?:my teammate|my colleague|they)\b/i;
+  return completedClauses(text).filter(part => !otherPerson.test(part));
+}
+
+export function appliedClauses(text) {
+  const action = /정리|분석|집계|분류|작성|설계|구현|개발|제작|만들|만들었|수정|검증|테스트|발표|시각화|실습|처리|계산|자동화|조인|배포|운영|비교|가공|변환|추가|최적화|적용|사용했|썼|버전 관리|튜닝|built|implemented|wrote|tested|deployed|analyzed/i;
+  const observation = /구경|지켜봤|지켜보았|따라 읽|강의를? 들|수업을? 들|영상(?:을)? 봤|기사를? 읽|문서를? 읽/i;
+  return directClauses(text).filter(part => action.test(part) && !observation.test(part));
 }
 
 // Sub-skills for activities that carry none of their own (hand-written ones). A real model would name these itself.
@@ -358,17 +426,18 @@ function projectTags(all) {
   return tags;
 }
 export function extractProject(text, matches) {
-  const done = completedClauses(text);
+  const done = directClauses(text);
   if (!done.some(part => built.test(part))) return null;
   const all = done.join("\n");
-  const first = [...matches].sort((a,b) => text.indexOf(a.trigger) - text.indexOf(b.trigger))[0];
+  const first = matches.filter(match => match.id !== "project-delivery")
+    .sort((a,b) => text.indexOf(a.trigger) - text.indexOf(b.trigger))[0];
   const kind = (projectKinds.find(([,pattern]) => pattern.test(all)) || ["구현"])[0];
   return {name:[first ? skills[first.id].name : "", kind, "프로젝트"].filter(Boolean).join(" "), tags:projectTags(all)};
 }
 
-export function extractSkills(text) {
+export function extractSkills(text, written = false) {
   const evidence = new Map();
-  for (const excerpt of completedClauses(text)) {
+  for (const excerpt of written ? appliedClauses(text) : completedClauses(text)) {
     for (const [id, skill] of Object.entries(skills)) {
       const match = skill.pattern.exec(excerpt);
       if (match && !evidence.has(id)) evidence.set(id, {id, trigger:match[0], excerpt});

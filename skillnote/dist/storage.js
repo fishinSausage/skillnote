@@ -1,5 +1,7 @@
 import {extractSkills} from "./catalog.js?v=18";
 
+export const databaseName = document.documentElement.hasAttribute("data-presentation-demo") ? "skillnote-presentation" : "skillnote-journal";
+
 const samples = [
   ["survey", "2026-11-17", "통계 수업에서 Python으로 학식 만족도 설문 86건의 결측치를 정리했다. 메뉴별 평균 점수를 계산해 팀 발표 자료에 넣었다."],
   ["club", "2026-11-14", "개발 동아리에서 React로 축제 부스 검색 화면을 만들었다. Git 브랜치에 변경 사항을 올리고 팀원 리뷰를 반영했다."],
@@ -9,7 +11,7 @@ const samples = [
 let connection;
 function database() {
   if (!connection) connection = new Promise((resolve, reject) => {
-    const request = indexedDB.open("skillnote-journal", 3);
+    const request = indexedDB.open(databaseName, 3);
     request.onupgradeneeded = event => {
       const store = event.oldVersion === 0
         ? request.result.createObjectStore("activities", {keyPath:"id"})
@@ -65,5 +67,19 @@ export async function writeActivity(id, previousRevision, next) {
     };
     tx.oncomplete = () => resolve();
     tx.onabort = () => reject(new Error(conflict ? "다른 창에서 이 기록이 바뀌었어요. 최신 기록을 다시 열어 주세요." : "기기에 저장하지 못했어요. 저장 공간과 브라우저 설정을 확인해 주세요."));
+  });
+}
+
+export async function resetActivities() {
+  const pending = connection;
+  if (pending) {
+    const db = await pending.catch(() => null);
+    db?.close();
+    if (connection === pending) connection = undefined;
+  }
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(databaseName);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
   });
 }

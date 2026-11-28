@@ -1,5 +1,5 @@
 const cachePrefix = "skillnote-shell-" + self.registration.scope + "-";
-const cacheName = cachePrefix + "18";
+const cacheName = cachePrefix + "27";
 const assets = ["index.html","styles.css?v=18","app.js?v=18","catalog.js?v=18","storage.js?v=18","eclass.js?v=18","icons.js","mark.svg"];
 const assetUrls = new Set(assets.map(name => new URL(name,self.registration.scope).href));
 const entry = new URL("index.html",self.registration.scope).href;
